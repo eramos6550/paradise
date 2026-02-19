@@ -261,7 +261,7 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(service_select, pattern="^svc_"))
-    app.add_handler(CallbackQueryHandler(flight_type, pattern="^flight_"))
+    app.add_handler(CallbackQueryHandler(flight_type, pattern="^flight_(oneway|roundtrip)$"))
     app.add_handler(CallbackQueryHandler(passenger_count, pattern="^pax_"))
     app.add_handler(CallbackQueryHandler(car_provider, pattern="^car_"))
     app.add_handler(CallbackQueryHandler(admin_actions))
