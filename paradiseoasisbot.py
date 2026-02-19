@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 import uuid
 
-TOKEN = "8389709391:AAHaDABvO7ggEEeE2zsrBdyE7Q0sv1tBFl4"
+TOKEN = "YOUR_TOKEN_HERE"
 ADMIN_CHAT_ID = -1003510243073
 
 # ================= STORAGE =================
@@ -150,78 +150,67 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     text = update.message.text
 
+    # ADMIN CHAT
     if uid in ADMIN_ACTIVE:
-        order = ORDERS.get(ADMIN_ACTIVE[uid])
-        if order:
+        oid = ADMIN_ACTIVE[uid]
+        order = ORDERS.get(oid)
+        if order and order["status"] == "OPEN":
             await context.bot.send_message(order["user_id"], f"💬 Agent: {text}")
         return
 
+    # CUSTOMER CHAT
     if uid in USER_TO_ORDER:
-        order = ORDERS.get(USER_TO_ORDER[uid])
-        if order and order["admin"]:
+        oid = USER_TO_ORDER[uid]
+        order = ORDERS.get(oid)
+        if order and order["status"] == "OPEN" and order["admin"]:
             await context.bot.send_message(order["admin"], f"💬 Customer: {text}")
         return
 
     step = context.user_data.get("step")
 
-    if step == "depart_city":
-        context.user_data["depart_city"] = text
-        context.user_data["step"] = "arrival_city"
-        await update.message.reply_text("🛬 Arrival city:")
-        return
-
-    if step == "arrival_city":
-        context.user_data["arrival_city"] = text
-        context.user_data["step"] = "dates"
-        await update.message.reply_text("📅 Travel dates:")
-        return
-
-    if step == "dates":
-        context.user_data["dates"] = text
-        context.user_data["step"] = "time_pref"
-        await update.message.reply_text("⏰ Time preference (morning / afternoon / evening):")
-        return
-
-    if step == "time_pref":
-        context.user_data["time_pref"] = text
-        context.user_data["step"] = "passenger_info"
-        await update.message.reply_text(
-            "👤 Send passenger details:\n"
-            "First & last name (as on ID) + DOB"
-        )
-        return
-
     if step in ["hotel_info","airbnb_info","car_details","amtrak_info","parks_info","passenger_info"]:
         context.user_data["details"] = text
-        context.user_data["step"] = "finalize"
         await finalize_order(update, context)
+        return
 
-# ================= PHOTO RELAY =================
+# ================= PHOTO ROUTER =================
 async def photo_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     photo = update.message.photo[-1]
 
+    # ADMIN SENDING
     if uid in ADMIN_ACTIVE:
-        order = ORDERS.get(ADMIN_ACTIVE[uid])
-        if order:
+        oid = ADMIN_ACTIVE[uid]
+        order = ORDERS.get(oid)
+        if order and order["status"] == "OPEN":
             await context.bot.send_photo(order["user_id"], photo.file_id)
         return
 
+    # CUSTOMER SENDING (THIS FIXES SCREENSHOT ISSUE)
     if uid in USER_TO_ORDER:
-        order = ORDERS.get(USER_TO_ORDER[uid])
-        if order and order["admin"]:
+        oid = USER_TO_ORDER[uid]
+        order = ORDERS.get(oid)
+        if order and order["status"] == "OPEN" and order["admin"]:
             await context.bot.send_photo(order["admin"], photo.file_id)
         return
+
+    # If no active order → create one
+    step = context.user_data.get("step")
+    if step in ["hotel_info","airbnb_info","car_details","amtrak_info","parks_info"]:
+        context.user_data["details"] = "Screenshot attached"
+        await finalize_order(update, context)
 
 # ================= FINALIZE =================
 async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     oid = str(uuid.uuid4())[:8]
+
     ORDERS[oid] = {
         "user_id": update.message.from_user.id,
         "admin": None,
         "status": "OPEN",
         "price": 0.0,
     }
+
     USER_TO_ORDER[update.message.from_user.id] = oid
 
     keyboard = [
@@ -244,9 +233,9 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= ADMIN ACTIONS =================
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global LIFETIME_SALES
     q = update.callback_query
     await q.answer()
+
     action, oid = q.data.split("_")
     order = ORDERS.get(oid)
     if not order:
@@ -257,37 +246,20 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ADMIN_ACTIVE[q.from_user.id] = oid
         await context.bot.send_message(order["user_id"], "👤 An agent has joined the chat.")
 
-    elif action == "paid":
-        order["status"] = "PAID"
-        LIFETIME_SALES += order.get("price", 0.0)
-        await q.message.reply_text(f"✅ Order {oid} marked PAID")
-
-    elif action == "unpaid":
-        order["status"] = "UNPAID"
-        await q.message.reply_text(f"❌ Order {oid} marked UNPAID")
-
     elif action == "close":
         order["status"] = "CLOSED"
-        await q.message.reply_text(f"🔒 Order {oid} closed")
 
-# ================= PRICE COMMAND =================
-async def set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
-    if uid not in ADMIN_ACTIVE:
-        return
-    try:
-        price = float(context.args[0])
-        oid = ADMIN_ACTIVE[uid]
-        ORDERS[oid]["price"] = price
-        await update.message.reply_text(f"💰 Price set: ${price:.2f}")
-    except:
-        pass
+        # CLEANUP FIX
+        USER_TO_ORDER.pop(order["user_id"], None)
+        ADMIN_ACTIVE.pop(order["admin"], None)
+
+        await context.bot.send_message(order["user_id"], "🔒 Order closed.")
+        await q.message.reply_text(f"🔒 Order {oid} closed")
 
 # ================= MAIN =================
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("price", set_price))
     app.add_handler(CallbackQueryHandler(service_select, pattern="^svc_"))
     app.add_handler(CallbackQueryHandler(flight_type, pattern="^flight_"))
     app.add_handler(CallbackQueryHandler(passenger_count, pattern="^pax_"))
@@ -295,9 +267,9 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_actions))
     app.add_handler(MessageHandler(filters.PHOTO, photo_router))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
+
     print("✅ Paradise Oasis Concierge running")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
