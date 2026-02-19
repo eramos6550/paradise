@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 import uuid
 
-TOKEN = "YOUR_TOKEN_HERE"
+TOKEN = "8389709391:AAHaDABvO7ggEEeE2zsrBdyE7Q0sv1tBFl4"
 ADMIN_CHAT_ID = -1003510243073
 
 # ================= STORAGE =================
